@@ -1,0 +1,189 @@
+
+%---------------- CONFIGURACOES
+
+ArquivoResultados = 'Ramp_Lambda0001.xlsx';
+
+% Configuracoes gerais da simulacao
+simuTime = 6000; % Tempo de simulação
+T = 15; % Tempo de amostragem do controlador
+Instante_habilita_controlador = 30; % Instante apos transitorio do modelo
+setpoint_inicial = 120;
+setpoint = 100; % Referencia final
+Criterio_Acomodacao = 15; % Criterio para definir momento de acomodacao
+n_amostras = 1; % Configuracoes de afericao estatistica
+
+
+% Configuracoes do controlador DIRAC
+Constante_tempo_referencia = 50*3; % Constante de tempo da malha de referencia (Tau_max*3)
+Tempo_de_acomodacao = Constante_tempo_referencia*4; %Tempo de acomodacao do modelo de referencia
+Tempo_Segundo_Step = 0;%Tempo_de_acomodacao; % Referencia de controle 
+ar = exp(-T/Constante_tempo_referencia); % Parametro de velocidade da malha de referencia
+d = 5; % Parametro de atraso da malha de referencia, superestimado em 1(multiplo de h nominal);
+saida_inicial_maxima = 0; % Estimacao de saida maxima inicial da planta
+comando_inicial = 0; % Comando inicial do controlador
+
+% Configuracoes do estimador 
+P_inicial = [0.01 0 0; 0 0.001 0 ; 0 0 1]; % Matriz Covariancia inicial 
+T_forgetting = Constante_tempo_referencia; % Horizonte de tempo de memoria (Estimador 1 2)
+forgetting_factor = exp(-T/T_forgetting); % Fator de esquecimento (Estimador 1 2)
+max_mult_P0 = 15;
+min_mult_P0 = 1/15;
+
+% Lambda Tuning para
+K_lambdaTuning = 9; % K = 0.25 ~ 9
+L_lambdaTuning = 60; % L = 20 ~60
+Tau_lambdaTuning = 75; % Tau = 30 ~ 75
+Tcl_lambdaTuning = Constante_tempo_referencia;
+
+Kp_inicial =  -Tau_lambdaTuning*0.01/(K_lambdaTuning*(Tau_lambdaTuning+Tcl_lambdaTuning));
+Ti_inicial =  Tau_lambdaTuning*0.01;
+Td_inicial =  0;
+
+% Calculo de configuracoes dos algoritmos de controle
+c0_inicial = Kp_inicial*(1+T/Ti_inicial+Td_inicial/T);
+c1_inicial = -Kp_inicial*(1+2*(Td_inicial/T));
+c2_inicial = Kp_inicial*(Td_inicial/T);
+theta_inicial = [c0_inicial; c1_inicial; c2_inicial];
+
+% Configuracoes do modelo
+Parametros_Paciente = {...
+    'ID',... % Identificador do paciente
+    'K',... % Ganho de pressao em resposta ao medicamento
+    'Tau',... % Constante de tempo 
+    'Tau_i',...  % Constante de atraso para transporte do medicamento  
+    'Tau_c',... % Constante de atraso por recirculação 
+    'alpha',... % Fracao de recirculacao 
+    'ba_frequencia_seno',... % Frequencia da senoide de background
+    'ba_offset',... % Pressão arterial de offset
+    'ba_amplitude_seno',... % Amplitude da senoidal de background
+    'ba_ganho_estocastico',... % Ganho da atividade estocastica 
+    'ba_limiar_reflexo' % Pressao limiar para atividade de reflexo
+    };
+Pacientes = Get_Pacientes(Parametros_Paciente); 
+
+PSS_amostras_1 = zeros(length(Pacientes),n_amostras);
+PSS_amostras_2 = zeros(length(Pacientes),n_amostras);
+PSS_amostras_3 = zeros(length(Pacientes),n_amostras);
+
+TA_amostras_1 = zeros(length(Pacientes),n_amostras);
+TA_amostras_2 = zeros(length(Pacientes),n_amostras);
+TA_amostras_3 = zeros(length(Pacientes),n_amostras);
+
+ESS_amostras_1 = zeros(length(Pacientes),n_amostras);
+ESS_amostras_2 = zeros(length(Pacientes),n_amostras);
+ESS_amostras_3 = zeros(length(Pacientes),n_amostras);
+
+Resultados_Por_Perfil = zeros(length(Pacientes),9);
+PSS_maximo = zeros(length(Pacientes),3); %1-3
+TA_maximo = zeros(length(Pacientes),3); %5-6
+ESS_maximo = zeros(length(Pacientes),3); %7-9
+
+% Graficos para cada paciente
+ for i=1:length(Pacientes)
+    
+    %---------------- DEFINE PACIENTE 
+    
+    K = Pacientes{i}('K'); % Ganho de pressao em resposta ao medicamento
+    Tau = Pacientes{i}('Tau'); % Constante de tempo 
+    Tau_i = Pacientes{i}('Tau_i');5; % Constante de atraso para transporte do medicamento  
+    Tau_c = Pacientes{i}('Tau_c'); % Constante de atraso por recirculação 
+    alpha = Pacientes{i}('alpha'); % Fracao de recirculacao 
+    ba_frequencia_seno = Pacientes{i}('ba_frequencia_seno'); % Frequencia da senoide de background
+    ba_offset = Pacientes{i}('ba_offset'); % Pressão arterial de offset
+    ba_amplitude_seno = Pacientes{i}('ba_amplitude_seno'); % Amplitude da senoidal de background
+    ba_ganho_estocastico = Pacientes{i}('ba_ganho_estocastico'); % Ganho da atividade estocastica
+    ba_limiar_reflexo = Pacientes{i}('ba_limiar_reflexo'); % Pressao limiar para atividade de reflexo
+    
+    for j=1:n_amostras
+    
+        %---------------- SIMULA PACIENTE E COLETA SINAIS
+        semente_ruido = j;
+
+        simu_Controlador_1 = sim('Verificacao_Controle_Pressao_1','StopTime', sprintf('%.6f',simuTime));
+        saida_planta_1 = simu_Controlador_1.saida;
+        entrada_planta_1 = simu_Controlador_1.entrada_planta;
+        saida_referencia_1 = simu_Controlador_1.saida_referencia;
+        theta_1 = simu_Controlador_1.theta;
+        perturbacao_1 = simu_Controlador_1.perturbacao;
+        referencia_1  = simu_Controlador_1.referencia;
+        
+        simu_Controlador_2 = sim('Verificacao_Controle_Pressao_2','StopTime', sprintf('%.6f',simuTime));
+        saida_planta_2 = simu_Controlador_2.saida;
+        entrada_planta_2 = simu_Controlador_2.entrada_planta;
+        saida_referencia_2 = simu_Controlador_2.saida_referencia;
+        theta_2 = simu_Controlador_2.theta;
+        perturbacao_2 = simu_Controlador_2.perturbacao;
+        referencia_2  = simu_Controlador_2.referencia;
+        
+        simu_Controlador_3 = sim('Verificacao_Controle_Pressao_3','StopTime', sprintf('%.6f',simuTime));
+        saida_planta_3 = simu_Controlador_3.saida;
+        entrada_planta_3 = simu_Controlador_3.entrada_planta;
+        saida_referencia_3 = simu_Controlador_3.saida_referencia;
+        theta_3 = simu_Controlador_3.theta;
+        perturbacao_3 = simu_Controlador_3.perturbacao;
+        referencia_3  = simu_Controlador_3.referencia;
+                      
+        %---------------- AVALIA DESEMPENHO
+         = Metricas(saida_planta_1.time,saida_planta_1.data,setpoint,Instante_habilita_controlador); 
+         = Metricas(saida_planta_2.time,saida_planta_2.data,setpoint,Instante_habilita_controlador); 
+         = Metricas(saida_planta_3.time,saida_planta_3.data,setpoint,Instante_habilita_controlador); 
+        
+        %---------------- REGISTRA DESEMPENHO DA AMOSTRA
+        PSS_amostras_1(i,j) = PSS_1;
+        
+        PSS_amostras_2(i,j) = PSS_2;
+        
+        PSS_amostras_3(i,j) = PSS_3;
+
+        
+
+        
+    end
+    
+    %---------------- AVALIA DESEMPENHO DOS CONTROLADORES PARA O PERFIL DE PACIENTE
+    
+    Resultados_Por_Perfil(i,1) = PSS_maximo(i,1);
+    Resultados_Por_Perfil(i,2) = PSS_maximo(i,2);
+    Resultados_Por_Perfil(i,3) = PSS_maximo(i,3);
+    Resultados_Por_Perfil(i,4) = TA_maximo(i,1);
+    Resultados_Por_Perfil(i,5) = TA_maximo(i,2);
+    Resultados_Por_Perfil(i,6) = TA_maximo(i,3);
+    Resultados_Por_Perfil(i,7) = ESS_maximo(i,1);
+    Resultados_Por_Perfil(i,8) = ESS_maximo(i,2);
+    Resultados_Por_Perfil(i,9) = ESS_maximo(i,3);
+ end
+
+disp(Resultados_Por_Perfil);
+writetable(...
+    array2table(Resultados_Por_Perfil,...
+    'VariableNames',{'PSS_1','PSS_2','PSS_3'}),...
+    ArquivoResultados);
+ 
+
+ 
+
+function [erro_relativo_medio] = Metricas(tempo,saida,setpoint,perturbacao,Instante_habilita_analise)
+    
+    i_start = tempo(find(tempo>Instante_habilita_analise,1,'first'));
+    erro = saida - setpoint.* ones(length(saida(i_start:end)),1);
+    erro_std = std(erro);
+    
+    pert_std = std(perturbacao);
+    
+    erro_relativo_medio = erro_std/pert_std;
+end 
+
+function pacientes = Get_Pacientes(Parametros_Paciente)
+    % Pacientes sem acao de perturbacao
+    
+    Paciente_1 = containers.Map(Parametros_Paciente,[1 -0.25 30 20 30 0.4 1.25663706 150 4 10 70]);
+    Paciente_2 = containers.Map(Parametros_Paciente,[2 -0.5  34 25 35 0.2 1.25663706 150 4 10 70]);
+    Paciente_3 = containers.Map(Parametros_Paciente,[3 -0.75 37 30 40 0.4 1.25663706 150 4 10 70]);
+    Paciente_4 = containers.Map(Parametros_Paciente,[4 -1    40 40 45 0.2 1.25663706 150 4 10 70]);
+    Paciente_5 = containers.Map(Parametros_Paciente,[5 -2    45 45 55 0.4 1.25663706 150 4 10 70]);
+    Paciente_6 = containers.Map(Parametros_Paciente,[6 -4    55 50 60 0.2 1.25663706 150 4 10 70]);
+    Paciente_7 = containers.Map(Parametros_Paciente,[7 -6    65 55 65 0.4 1.25663706 150 4 10 70]);
+    Paciente_8 = containers.Map(Parametros_Paciente,[8 -8    75 60 75 0.2 1.25663706 150 4 10 70]); 
+    pacientes = {Paciente_1,Paciente_2,Paciente_3,Paciente_4,Paciente_5,Paciente_6,Paciente_7,Paciente_8};
+    %pacientes = {Paciente_1,Paciente_8};
+end
