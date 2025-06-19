@@ -4,8 +4,8 @@ This repository contains the MATLAB implementation of directly adaptive PID cont
 
 This project received the highest possible grade as a graduation requirement and was presented at the Brazilian Congress of Automatics (CBA) 2024.
 
-- Congress article (Link): it is the more recent form of the work, correcting the interpretetion of the hypertensions requirements and presenting the results.
-- Graduation thesis (Link): more extensive discussion, presenting the theory of adaptive controllers, the adopted algorithm and implementation in detail.
+- Congress article [(Link)](https://www.sba.org.br/cba2024/papers/paper_2078.pdf): it is the more recent form of the work, correcting the interpretetion of the hypertensions requirements and presenting the results.
+- Graduation thesis [(Link)](https://repositorio.ufsc.br/handle/123456789/252540): more extensive discussion, presenting the theory of adaptive controllers, the adopted algorithm and implementation in detail.
  
 ## Overview
 
